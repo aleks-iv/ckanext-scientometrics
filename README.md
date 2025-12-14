@@ -2,121 +2,182 @@
 
 # ckanext-scientometrics
 
-**TODO:** Put a description of your extension here:  What does it do? What features does it have? Consider including some screenshots or embedding a video!
+Scientometrics metrics for CKAN users. The extension lets you:
 
+- store author identifiers (per source) in user extras (`plugin_extras`)
+- fetch author-level metrics from external providers
+- persist fetched metrics in dedicated DB tables
+- display selected metrics on the user page
+
+Supported sources (as implemented):
+
+- Google Scholar (author profile metrics)
+- Semantic Scholar (author metrics)
+- OpenAlex (author metrics)
+
+## How it works
+
+- User author identifiers are stored in the user `plugin_extras` under `scim`:
+  keys like `<source>_author_id` (e.g. `google_scholar_author_id`).
+- Metrics are fetched via per-source extractors and stored in:
+  - `scim_user_metric` (per user + source)
+  - `scim_dataset_metric` (reserved for dataset metrics; currently only model/migration exist)
+- The user page template can render cards for enabled sources using the stored metrics.
+
+## Usage
+
+### 1) Configure enabled sources
+
+Enable the plugin in CKAN config:
+
+```ini
+ckan.plugins = ... scientometrics
+```
+
+Configure which metric sources are enabled:
+
+```ini
+ckanext.scientometrics.enabled_metrics = google_scholar semantic_scholar openalex
+ckanext.scientometrics.show_on_user_page = true
+```
+
+### 2) Add author IDs to a user
+
+In the user edit form, the extension adds extra fields (one per enabled source).
+The values are stored under `plugin_extras["scim"]` as:
+
+- `google_scholar_author_id`
+- `semantic_scholar_author_id`
+- `openalex_author_id`
+
+### 3) Update metrics for a user (action)
+
+The extension provides actions to fetch and store metrics. A typical call:
+
+- `scim_update_user_metrics` with:
+  - `user_id` (id or name)
+  - `requested_sources` (optional list of sources; defaults to enabled sources)
+
+Stored records are keyed by `(user_id, source)` in `scim_user_metric`.
+
+To retrieve stored metrics:
+
+- `scim_get_user_metrics` with:
+  - `user_id`
+
+Returns a dict keyed by `source`, where each value is built from the stored JSON metrics
+plus metadata like status and external references (when present).
+
+### 4) Update metrics for all users (CLI)
+
+The extension exposes a CLI command:
+
+```bash
+ckan scim update-user-metrics
+```
+
+Options:
+
+- `--user-ids <id>` (repeatable): update only specified user IDs
+- `--requested-sources <source>` (repeatable): update only specified sources
+
+If no `--user-ids` are provided, it updates all users.
+
+## Database
+
+This extension creates two tables:
+
+- `scim_user_metric`
+  - unique constraint: `(user_id, source)`
+  - stores:
+    - `metrics` (JSONB)
+    - `external_id`, `external_url`
+    - `status`
+    - timestamps
+    - `extras` (JSONB for future metadata)
+
+- `scim_dataset_metric`
+  - unique constraint: `(package_id, source)`
+  - same structure as user metrics table
+
+Foreign keys are configured with `ondelete="CASCADE"`.
 
 ## Requirements
-
-**TODO:** For example, you might want to mention here which versions of CKAN this
-extension works with.
-
-If your extension works across different versions you can add the following table:
 
 Compatibility with core CKAN versions:
 
 | CKAN version    | Compatible?   |
 | --------------- | ------------- |
-| 2.6 and earlier | not tested    |
-| 2.7             | not tested    |
-| 2.8             | not tested    |
-| 2.9             | not tested    |
+| 2.9 and earlier | no    |
+| 2.10+           | yes    |
 
-Suggested values:
-
-* "yes"
-* "not tested" - I can't think of a reason why it wouldn't work
-* "not yet" - there is an intention to get it working
-* "no"
-
+(Tests run in CI on a CKAN 2.11 container.)
 
 ## Installation
-
-**TODO:** Add any additional install steps to the list below.
-   For example installing any non-Python dependencies or adding any required
-   config settings.
 
 To install ckanext-scientometrics:
 
 1. Activate your CKAN virtual environment, for example:
 
-     . /usr/lib/ckan/default/bin/activate
+   ```bash
+   . /usr/lib/ckan/default/bin/activate
+   ```
 
-2. Clone the source and install it on the virtualenv
+2. Clone the source and install it on the virtualenv:
 
-    git clone https://github.com/aleks-iv/ckanext-scientometrics.git
-    cd ckanext-scientometrics
-    pip install -e .
-	pip install -r requirements.txt
+   ```bash
+   git clone https://github.com/aleks-iv/ckanext-scientometrics.git
+   cd ckanext-scientometrics
+   pip install -e .
+   pip install -r requirements.txt
+   ```
 
-3. Add `scientometrics` to the `ckan.plugins` setting in your CKAN
-   config file (by default the config file is located at
-   `/etc/ckan/default/ckan.ini`).
+3. Add `scientometrics` to the `ckan.plugins` setting in your CKAN config file
+   (by default `/etc/ckan/default/ckan.ini`).
 
-4. Restart CKAN. For example if you've deployed CKAN with Apache on Ubuntu:
+4. Restart CKAN (eg on Ubuntu + Apache):
 
-     sudo service apache2 reload
-
+   ```bash
+   sudo service apache2 reload
+   ```
 
 ## Config settings
 
-None at present
+- `ckanext.scientometrics.enabled_metrics` (type: list)
+  - default: `google_scholar semantic_scholar openalex`
+  - enabled sources; controls which user fields are shown and which sources can be updated
 
-**TODO:** Document any optional config settings here. For example:
+- `ckanext.scientometrics.show_on_user_page` (type: bool)
+  - default: `true`
+  - show metrics cards on the user page
 
-	# The minimum number of hours to wait before re-checking a resource
-	# (optional, default: 24).
-	ckanext.scientometrics.some_setting = some_default_value
+Example:
 
+```ini
+ckan.plugins = ... scientometrics
+
+ckanext.scientometrics.enabled_metrics = openalex semantic_scholar
+ckanext.scientometrics.show_on_user_page = true
+```
 
 ## Developer installation
 
-To install ckanext-scientometrics for development, activate your CKAN virtualenv and
-do:
+To install for development:
 
-    git clone https://github.com/aleks-iv/ckanext-scientometrics.git
-    cd ckanext-scientometrics
-    python setup.py develop
-    pip install -r dev-requirements.txt
-
+```bash
+git clone https://github.com/aleks-iv/ckanext-scientometrics.git
+cd ckanext-scientometrics
+pip install -e .
+pip install -r dev-requirements.txt
+```
 
 ## Tests
 
-To run the tests, do:
+To run tests:
 
-    pytest --ckan-ini=test.ini
-
-
-## Releasing a new version of ckanext-scientometrics
-
-If ckanext-scientometrics should be available on PyPI you can follow these steps to publish a new version:
-
-1. Update the version number in the `setup.py` file. See [PEP 440](http://legacy.python.org/dev/peps/pep-0440/#public-version-identifiers) for how to choose version numbers.
-
-2. Make sure you have the latest version of necessary packages:
-
-    pip install --upgrade setuptools wheel twine
-
-3. Create a source and binary distributions of the new version:
-
-       python setup.py sdist bdist_wheel && twine check dist/*
-
-   Fix any errors you get.
-
-4. Upload the source distribution to PyPI:
-
-       twine upload dist/*
-
-5. Commit any outstanding changes:
-
-       git commit -a
-       git push
-
-6. Tag the new release of the project on GitHub with the version number from
-   the `setup.py` file. For example if the version number in `setup.py` is
-   0.0.1 then do:
-
-       git tag 0.0.1
-       git push --tags
+```bash
+pytest --ckan-ini=test.ini
+```
 
 ## License
 
